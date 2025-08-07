@@ -9,12 +9,14 @@ dist/
 build/
 *.tsbuildinfo
 
-# Environment variables
+# Environment variables - NEVER commit these!
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.test
 
 # IDE and Editor files
 .vscode/
@@ -64,8 +66,20 @@ coverage/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# Test and debug files
+*.test.js
+test-*.js
+debug-*.js
+validate-*.js
+direct-test.*
+
+# Security - never commit sensitive data
 .env.test
+.env.production
+*.pem
+*.key
+config/secrets.*
+credentials.*
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

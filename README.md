@@ -1,6 +1,12 @@
 # Bitbucket MCP Server
 
-A comprehensive Model Context Protocol (MCP) server for Bitbucket integration, providing tools for repository management, pull requests, issues, and code analysis.
+A secure, production-ready Model Context Protocol (MCP) server for Bitbucket integration. Designed specifically for code review workflows, it provides reliable access to pull request diffs even with limited repository permissions.
+
+## ✨ **Key Highlights**
+- **Enhanced PR Diff Access**: Works even when you're not the PR author
+- **Smart Fallback Methods**: Multiple approaches to retrieve diff data
+- **Secure by Default**: No credentials stored, comprehensive security practices
+- **Code Review Optimized**: Perfect for reviewing colleagues' pull requests
 
 ## Features
 
@@ -42,22 +48,62 @@ npm run build
    - **appPassword**: Your Bitbucket app password
    - **workspace**: Default workspace name (optional)
 
-## Usage
+## 🚀 **Quick Start**
 
-### Configuration
-First, configure your Bitbucket connection:
+### 1. Installation
+```bash
+# Clone and build
+git clone <repository-url>
+cd bitbucket-mcp-server
+npm install
+npm run build
+```
 
+### 2. MCP Client Configuration
+Add to your MCP client configuration (e.g., `~/.config/mcp/servers.json`):
+```json
+{
+  "mcpServers": {
+    "bitbucket-mcp-server": {
+      "command": "node",
+      "args": ["/path/to/bitbucket-mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+### 3. Configure Bitbucket Access
+**Create API Token**: Visit [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
+
+**Configure via MCP**:
 ```json
 {
   "tool": "configure-bitbucket",
   "arguments": {
     "baseUrl": "https://api.bitbucket.org",
-    "username": "your-username",
-    "appPassword": "your-app-password",
+    "email": "your-email@domain.com",
+    "apiToken": "ATATT3x...",
     "workspace": "your-workspace"
   }
 }
 ```
+
+## Usage Examples
+
+### 🔍 **Code Review Workflow**
+```json
+{
+  "tool": "get-pull-request-diff",
+  "arguments": {
+    "workspace": "company-workspace",
+    "repo_slug": "main-app",
+    "pr_id": 1524,
+    "max_size": 20000
+  }
+}
+```
+
+**Why This Matters**: Even if you're not the PR author, this MCP server uses smart fallback methods to retrieve diff data for code review. Perfect for reviewing colleagues' work!
 
 ### Example Operations
 

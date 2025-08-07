@@ -2,7 +2,7 @@
  * Response formatting utilities for consistent output
  */
 
-import { Repository, PullRequest, Issue, Commit, Branch, CodeSearchResult, DiffStat } from '../client/types.js';
+import { Repository, PullRequest, Issue, Commit, Branch, CodeSearchResult, DiffStat, FilesChangedResponse } from '../client/types.js';
 
 export function formatRepositoryList(repos: Repository[]): string {
   if (repos.length === 0) {
@@ -60,20 +60,22 @@ export function formatPullRequestList(prs: PullRequest[]): string {
 
 export function formatPullRequest(pr: PullRequest): string {
   const stateEmoji = pr.state === 'OPEN' ? '🟢' : pr.state === 'MERGED' ? '🟣' : '🔴';
-  const approvals = pr.participants.filter((p) => p.approved);
-  const reviewers = pr.participants.filter((p) => !p.approved);
+  
+  // Handle both old and new data structures
+  const approvals = pr.reviewers?.filter((r) => r.approved) || pr.participants.filter((p) => p.approved);
+  const pendingReviews = pr.reviewers?.filter((r) => !r.approved) || pr.participants.filter((p) => !p.approved);
 
   return (
     `# Pull Request #${pr.id} ${stateEmoji}\n\n` +
     `**Title:** ${pr.title}\n` +
     `**State:** ${pr.state}\n` +
-    `**Author:** ${pr.author.display_name}\n` +
+    `**Author:** ${pr.author.display_name} (@${pr.author.username})\n` +
     `**Branch:** ${pr.source.branch.name} → ${pr.destination.branch.name}\n` +
     `**Created:** ${new Date(pr.created_on).toLocaleDateString()}\n` +
     `**Updated:** ${new Date(pr.updated_on).toLocaleDateString()}\n\n` +
     `**Description:**\n${pr.description || 'No description provided'}\n\n` +
-    `**Approvals (${approvals.length}):**\n${approvals.map((p) => `✅ ${p.user.display_name}`).join('\n') || 'None'}\n\n` +
-    `**Pending Reviews (${reviewers.length}):**\n${reviewers.map((p) => `⏳ ${p.user.display_name}`).join('\n') || 'None'}` +
+    `**Approvals (${approvals.length}):**\n${approvals.map((p) => `✅ ${p.display_name || ('user' in p ? p.user?.display_name : '')}`).join('\n') || 'None'}\n\n` +
+    `**Pending Reviews (${pendingReviews.length}):**\n${pendingReviews.map((p) => `⏳ ${p.display_name || ('user' in p ? p.user?.display_name : '')}`).join('\n') || 'None'}` +
     (pr.merge_commit ? `\n\n**Merge Commit:** ${pr.merge_commit.hash}` : '')
   );
 }
@@ -219,6 +221,28 @@ export function formatPullRequestFiles(pr_id: number, files: DiffStat[]): string
   return (
     `# Pull Request #${pr_id} - Files Changed (${files.length})\n\n` +
     `**Summary:** +${totalAdded} -${totalRemoved} lines across ${files.length} files\n\n${fileList}`
+  );
+}
+
+// New formatter that matches the actual MCP output structure
+export function formatFilesChangedResponse(pr_id: number, data: FilesChangedResponse): string {
+  if (data.files.length === 0) {
+    return `# Pull Request #${pr_id} - No Files Changed\n\nNo file changes found for this pull request.`;
+  }
+
+  const fileList = data.files
+    .map((file) => {
+      const status =
+        file.type === 'added' ? '✅' : file.type === 'removed' ? '❌' : file.type === 'modified' ? '📝' : '🔄';
+      const changes = `+${file.lines_added} -${file.lines_removed}`;
+
+      return `${status} **${file.file}** (${file.type})\n   ${changes} lines`;
+    })
+    .join('\n\n');
+
+  return (
+    `# Pull Request #${pr_id} - Files Changed (${data.summary.total_files})\n\n` +
+    `**Summary:** +${data.summary.total_additions} -${data.summary.total_deletions} lines across ${data.summary.total_files} files\n\n${fileList}`
   );
 }
 

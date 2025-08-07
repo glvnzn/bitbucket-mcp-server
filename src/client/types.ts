@@ -25,13 +25,14 @@ export interface PullRequest {
   title: string;
   description?: string;
   state: 'OPEN' | 'MERGED' | 'DECLINED';
-  author: { display_name: string; uuid: string };
-  source: { branch: { name: string }; repository: { name: string }; commit?: { hash: string } };
-  destination: { branch: { name: string }; repository: { name: string }; commit?: { hash: string } };
+  author: { display_name: string; username: string; uuid?: string };
+  source: { branch: { name: string }; repository?: { name: string }; commit?: { hash: string } };
+  destination: { branch: { name: string }; repository?: { name: string }; commit?: { hash: string } };
   created_on: string;
   updated_on: string;
   merge_commit?: { hash: string };
-  participants: Array<{ user: { display_name: string }; approved: boolean }>;
+  participants: Array<{ user?: { display_name: string }; display_name?: string; username?: string; approved: boolean }>;
+  reviewers?: Array<{ display_name: string; username: string; approved: boolean }>;
 }
 
 export interface Issue {
@@ -75,6 +76,21 @@ export interface DiffStat {
   status: 'added' | 'removed' | 'modified' | 'renamed';
   lines_added: number;
   lines_removed: number;
+}
+
+// Updated structure to match actual MCP output format
+export interface FilesChangedResponse {
+  files: Array<{
+    file: string;
+    type: 'modified' | 'added' | 'removed' | 'renamed';
+    lines_added: number;
+    lines_removed: number;
+  }>;
+  summary: {
+    total_files: number;
+    total_additions: number;
+    total_deletions: number;
+  };
 }
 
 export interface CreatePullRequestData {

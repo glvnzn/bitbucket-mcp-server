@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "bitbucket-mcp-server": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "BITBUCKET_BASE_URL": "https://api.bitbucket.org"
+      }
+    }
+  }
+}
