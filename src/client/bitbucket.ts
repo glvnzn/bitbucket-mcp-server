@@ -582,61 +582,203 @@ ${diffStat
   }
 
   private async getFileSpecificDiff(workspace: string, repo_slug: string, pr_id: number, filePath: string): Promise<string> {
+    console.log(`🔍 Getting file-specific diff for: ${filePath} in PR #${pr_id}`);
+    
     try {
       // Get PR details to extract commit hashes
       const pr = await this.getPullRequest(workspace, repo_slug, pr_id);
+      console.log(`📋 PR Details:`, {
+        id: pr.id,
+        title: pr.title?.substring(0, 50) + '...',
+        state: pr.state,
+        source_branch: pr.source?.branch?.name,
+        dest_branch: pr.destination?.branch?.name,
+        source_commit: pr.source?.commit?.hash?.substring(0, 8),
+        dest_commit: pr.destination?.commit?.hash?.substring(0, 8)
+      });
+
       const sourceCommit = pr.source.commit?.hash;
       const destinationCommit = pr.destination.commit?.hash;
 
       if (sourceCommit && destinationCommit) {
-        // Try to get diff for specific file using compare endpoint
-        const response = await this.client.get(
-          `/2.0/repositories/${workspace}/${repo_slug}/diff/${destinationCommit}..${sourceCommit}`,
-          { 
-            params: { 
-              path: filePath 
-            } 
+        console.log(`🔄 Attempting compare diff: ${destinationCommit.substring(0, 8)}..${sourceCommit.substring(0, 8)} for ${filePath}`);
+        
+        // Try multiple approaches for file-specific diff
+        const attempts = [
+          // Approach 1: Compare with path parameter
+          () => this.client.get(
+            `/2.0/repositories/${workspace}/${repo_slug}/diff/${destinationCommit}..${sourceCommit}`,
+            { params: { path: filePath } }
+          ),
+          // Approach 2: Compare without path, then extract
+          () => this.client.get(
+            `/2.0/repositories/${workspace}/${repo_slug}/diff/${destinationCommit}..${sourceCommit}`
+          ),
+          // Approach 3: Use source commit directly
+          () => this.client.get(
+            `/2.0/repositories/${workspace}/${repo_slug}/diff/${sourceCommit}`,
+            { params: { path: filePath } }
+          ),
+          // Approach 4: Get commits and try latest
+          async () => {
+            const commitsResponse = await this.client.get(`/2.0/repositories/${workspace}/${repo_slug}/pullrequests/${pr_id}/commits`);
+            const commits = commitsResponse.data.values || [];
+            if (commits.length > 0) {
+              const latestCommit = commits[0];
+              console.log(`🔄 Trying latest commit: ${latestCommit.hash.substring(0, 8)}`);
+              return this.client.get(
+                `/2.0/repositories/${workspace}/${repo_slug}/diff/${latestCommit.hash}`,
+                { params: { path: filePath } }
+              );
+            }
+            throw new Error('No commits found');
           }
-        );
-        return response.data;
+        ];
+
+        for (let i = 0; i < attempts.length; i++) {
+          try {
+            console.log(`🔄 Attempt ${i + 1}/${attempts.length} for file-specific diff`);
+            const response = await attempts[i]();
+            
+            if (response.data && response.data.trim().length > 0) {
+              console.log(`✅ Success with approach ${i + 1}, diff size: ${response.data.length} chars`);
+              
+              // If we got full diff without path filter, extract the file
+              if (i === 1) {
+                return this.extractFileFromDiff(response.data, filePath);
+              }
+              
+              return response.data;
+            } else {
+              console.log(`⚠️ Approach ${i + 1} returned empty diff`);
+            }
+          } catch (attemptError: any) {
+            console.log(`❌ Approach ${i + 1} failed:`, attemptError.response?.status, attemptError.response?.data?.error?.message || attemptError.message);
+            continue;
+          }
+        }
       }
 
-      throw new Error('Could not extract commit hashes from PR');
+      throw new Error(`Could not extract commit hashes from PR: source=${sourceCommit}, dest=${destinationCommit}`);
     } catch (error) {
+      console.log(`⚠️ File-specific diff failed, falling back to full diff extraction`);
+      
       // Fallback: get full diff and filter by file
-      const fullDiff = await this.getPullRequestDiff(workspace, repo_slug, pr_id);
-      return this.extractFileFromDiff(fullDiff, filePath);
+      try {
+        const fullDiff = await this.getPullRequestDiff(workspace, repo_slug, pr_id);
+        console.log(`📄 Full diff size: ${fullDiff.length} chars, extracting file: ${filePath}`);
+        const extracted = this.extractFileFromDiff(fullDiff, filePath);
+        console.log(`📤 Extracted file diff size: ${extracted.length} chars`);
+        return extracted;
+      } catch (fallbackError: any) {
+        console.error(`❌ Fallback extraction also failed:`, fallbackError.message);
+        return `Error retrieving diff for ${filePath}: ${(error as any).message}`;
+      }
     }
   }
 
   private extractFileFromDiff(fullDiff: string, filePath: string): string {
+    console.log(`🔍 Extracting ${filePath} from diff (${fullDiff.length} chars total)`);
+    
     const lines = fullDiff.split('\n');
     const fileBlocks: string[] = [];
     let currentBlock: string[] = [];
     let inTargetFile = false;
+    let matchedPaths: string[] = [];
 
-    for (const line of lines) {
+    // Normalize file path for better matching
+    const normalizedTargetPath = filePath.replace(/^\/+/, '').replace(/\/+$/, '');
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
       if (line.startsWith('diff --git')) {
+        // Save previous file block if we were in target file
         if (inTargetFile && currentBlock.length > 0) {
           fileBlocks.push(currentBlock.join('\n'));
+          console.log(`✅ Found block for ${filePath}, size: ${currentBlock.length} lines`);
         }
         
         currentBlock = [line];
-        inTargetFile = line.includes(`/${filePath}`) || line.includes(filePath);
+        inTargetFile = false;
+        
+        // Extract file paths from "diff --git a/path b/path"
+        const match = line.match(/diff --git a\/(.+?) b\/(.+?)(?:\s|$)/);
+        if (match) {
+          const pathA = match[1];
+          const pathB = match[2];
+          matchedPaths.push(pathA, pathB);
+          
+          // Check multiple matching patterns
+          const pathsToCheck = [pathA, pathB, normalizedTargetPath];
+          inTargetFile = pathsToCheck.some(path => {
+            const normalizedPath = path.replace(/^\/+/, '').replace(/\/+$/, '');
+            return (
+              normalizedPath === normalizedTargetPath ||
+              normalizedPath.endsWith('/' + normalizedTargetPath) ||
+              normalizedTargetPath.endsWith('/' + normalizedPath) ||
+              path.includes(filePath) ||
+              filePath.includes(path)
+            );
+          });
+          
+          if (inTargetFile) {
+            console.log(`🎯 Found target file match: ${pathA} or ${pathB} matches ${filePath}`);
+          }
+        } else {
+          // Fallback: check if line contains the file path
+          inTargetFile = line.includes(filePath) || filePath.includes(line.split(' ').pop() || '');
+        }
       } else {
         currentBlock.push(line);
-        
-        if (line.startsWith('diff --git') && inTargetFile) {
-          inTargetFile = false;
-        }
       }
     }
 
+    // Don't forget the last file block
     if (inTargetFile && currentBlock.length > 0) {
       fileBlocks.push(currentBlock.join('\n'));
+      console.log(`✅ Found final block for ${filePath}, size: ${currentBlock.length} lines`);
     }
 
-    return fileBlocks.join('\n\n') || `No changes found for file: ${filePath}`;
+    const result = fileBlocks.join('\n\n');
+    
+    if (result.trim().length === 0) {
+      console.log(`⚠️ No diff found for ${filePath}`);
+      console.log(`📋 Paths seen in diff: ${[...new Set(matchedPaths)].slice(0, 10).join(', ')}`);
+      
+      // Try a more lenient search
+      const fileName = filePath.split('/').pop() || filePath;
+      const lenientBlocks = [];
+      let currentLenientBlock: string[] = [];
+      let inLenientFile = false;
+      
+      for (const line of lines) {
+        if (line.startsWith('diff --git')) {
+          if (inLenientFile && currentLenientBlock.length > 0) {
+            lenientBlocks.push(currentLenientBlock.join('\n'));
+          }
+          
+          currentLenientBlock = [line];
+          inLenientFile = line.includes(fileName);
+        } else {
+          currentLenientBlock.push(line);
+        }
+      }
+      
+      if (inLenientFile && currentLenientBlock.length > 0) {
+        lenientBlocks.push(currentLenientBlock.join('\n'));
+      }
+      
+      if (lenientBlocks.length > 0) {
+        console.log(`✅ Found diff using lenient filename match: ${fileName}`);
+        return lenientBlocks.join('\n\n');
+      }
+      
+      return `No changes found for file: ${filePath}\n\nNote: Searched in diff containing ${matchedPaths.length} file paths. Try using just the filename or a partial path.`;
+    }
+    
+    console.log(`✅ Successfully extracted ${result.length} chars for ${filePath}`);
+    return result;
   }
 
   private applyDiffFilters(diff: string, options: {
