@@ -1,0 +1,12 @@
+{
+  "name": "bitbucket-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Bitbucket integration",
+  "mcpServers": {
+    "bitbucket-mcp-server": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {}
+    }
+  }
+}
